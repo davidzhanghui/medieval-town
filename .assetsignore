@@ -1,0 +1,8 @@
+wrangler.jsonc
+.assetsignore
+.gitignore
+.wrangler
+.claude
+.git
+scripts
+README.md

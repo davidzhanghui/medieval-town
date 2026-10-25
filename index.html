@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>中世纪城堡 · 3D 可交互场景</title>
+<style>
+  :root {
+    --gold: #d8b25e;
+    --gold-dim: #a8863f;
+    --ink: #12100c;
+    --parch: #efe4cc;
+    --glass: rgba(16, 14, 11, 0.72);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #0a0d14;
+    font-family: "Songti SC", "STSong", "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+    color: var(--parch);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #scene { display: block; width: 100vw; height: 100vh; cursor: grab; }
+  #scene:active { cursor: grabbing; }
+
+  /* ---------- 加载层 ---------- */
+  #loader {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 22px;
+    background: radial-gradient(circle at 50% 45%, #1c1a15, #06070a 70%);
+    transition: opacity 0.9s ease, visibility 0.9s;
+  }
+  #loader.hide { opacity: 0; visibility: hidden; }
+  #loader .sigil {
+    width: 74px; height: 74px;
+    border: 2px solid var(--gold-dim);
+    transform: rotate(45deg);
+    position: relative;
+    animation: spin 4.5s linear infinite;
+  }
+  #loader .sigil::after {
+    content: "";
+    position: absolute; inset: 9px;
+    border: 1px solid rgba(216, 178, 94, 0.45);
+  }
+  #loader .sigil::before {
+    content: "";
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 10px; height: 10px;
+    margin: -5px 0 0 -5px;
+    background: var(--gold);
+    border-radius: 50%;
+  }
+  @keyframes spin { to { transform: rotate(405deg); } }
+  #loader p {
+    letter-spacing: 0.55em;
+    font-size: 12px;
+    color: var(--gold);
+    text-indent: 0.55em;
+    opacity: 0.85;
+  }
+
+  /* ---------- 标题 ---------- */
+  .title {
+    position: fixed;
+    left: 34px; top: 30px;
+    z-index: 10;
+    pointer-events: none;
+    animation: fadeUp 1.4s 0.4s both;
+  }
+  .title .kicker {
+    font-size: 10.5px;
+    letter-spacing: 0.42em;
+    color: var(--gold);
+    text-transform: uppercase;
+    opacity: 0.9;
+    margin-bottom: 10px;
+  }
+  .title h1 {
+    font-size: 34px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    line-height: 1.15;
+    text-shadow: 0 3px 26px rgba(0, 0, 0, 0.85);
+  }
+  .title .rule {
+    width: 66px; height: 1px;
+    margin: 14px 0 11px;
+    background: linear-gradient(90deg, var(--gold), transparent);
+  }
+  .title p {
+    font-size: 12.5px;
+    letter-spacing: 0.14em;
+    color: rgba(239, 228, 204, 0.62);
+  }
+
+  /* ---------- 控制按钮 ---------- */
+  .controls {
+    position: fixed;
+    right: 28px; top: 30px;
+    z-index: 12;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    animation: fadeUp 1.4s 0.55s both;
+  }
+  .btn {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 132px;
+    padding: 10px 15px;
+    background: var(--glass);
+    border: 1px solid rgba(216, 178, 94, 0.26);
+    border-radius: 2px;
+    color: rgba(239, 228, 204, 0.82);
+    font-family: inherit;
+    font-size: 12.5px;
+    letter-spacing: 0.13em;
+    cursor: pointer;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    transition: all 0.28s ease;
+  }
+  .btn:hover {
+    border-color: rgba(216, 178, 94, 0.65);
+    color: #fff8e8;
+    background: rgba(32, 27, 19, 0.85);
+    transform: translateX(-3px);
+  }
+  .btn.active {
+    border-color: var(--gold);
+    color: var(--gold);
+    box-shadow: inset 0 0 22px rgba(216, 178, 94, 0.16);
+  }
+  .btn .ico {
+    width: 15px; height: 15px;
+    flex: none;
+    opacity: 0.9;
+  }
+
+  /* ---------- 底部探索条 ----------
+     .spots-bar 负责定位与横向滚动，里面的 .spots 是两行按钮 */
+  .spots-bar {
+    position: fixed;
+    left: 50%; bottom: 26px;
+    transform: translateX(-50%);
+    z-index: 12;
+    display: flex;
+    gap: 7px;
+    padding: 7px;
+    background: rgba(12, 11, 9, 0.66);
+    border: 1px solid rgba(216, 178, 94, 0.2);
+    border-radius: 3px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    animation: fadeUp 1.4s 0.7s both;
+    max-width: calc(100vw - 40px);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .spots-bar::-webkit-scrollbar { display: none; }
+  .spots {
+    display: flex;
+    gap: 7px;
+    align-items: center;
+    flex: 0 0 auto;
+  }
+  /* 主场景与外围场景之间的隔断 */
+  .spot-sep {
+    flex: 0 0 auto;
+    width: 1px;
+    align-self: stretch;
+    margin: 2px 3px;
+    background: rgba(216, 178, 94, 0.28);
+  }
+  /* 分组按钮：展开时点亮 */
+  .spot-group.on {
+    color: var(--gold);
+    border-color: rgba(216, 178, 94, 0.45);
+    background: rgba(216, 178, 94, 0.12);
+  }
+  /* 外围场景的那一段：留在同一行里，左右挨着 */
+  .spots-sub[hidden] { display: none; }
+  .spot {
+    background: none;
+    border: 1px solid transparent;
+    color: rgba(239, 228, 204, 0.6);
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    padding: 7px 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    border-radius: 2px;
+    transition: all 0.25s ease;
+  }
+  .spot:hover {
+    color: var(--gold);
+    border-color: rgba(216, 178, 94, 0.35);
+    background: rgba(216, 178, 94, 0.07);
+  }
+
+  /* ---------- 提示 ---------- */
+  .hint {
+    position: fixed;
+    left: 34px; bottom: 28px;
+    z-index: 10;
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    color: rgba(239, 228, 204, 0.36);
+    line-height: 1.9;
+    pointer-events: none;
+    animation: fadeUp 1.4s 0.85s both;
+  }
+  .hint b { color: rgba(216, 178, 94, 0.7); font-weight: 400; }
+
+  /* ---------- 小地图 ---------- */
+  .minimap {
+    position: fixed;
+    left: 30px; bottom: 150px;
+    width: 200px; height: 200px;
+    z-index: 11;
+    border-radius: 50%;
+    background: rgba(12, 11, 9, 0.5);
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(216, 178, 94, 0.28);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    animation: fadeUp 1.4s 1.1s both;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  .minimap.hidden { opacity: 0; transform: scale(0.9); pointer-events: none; }
+  .minimap canvas { width: 100%; height: 100%; display: block; border-radius: 50%; }
+  .mm-tip {
+    position: fixed; left: 0; top: 0; z-index: 31;
+    padding: 5px 11px;
+    background: rgba(14, 12, 9, 0.9);
+    border: 1px solid rgba(216, 178, 94, 0.45);
+    border-radius: 2px;
+    font-size: 12px; letter-spacing: 0.12em; color: var(--gold);
+    pointer-events: none; opacity: 0; transition: opacity 0.15s ease; white-space: nowrap;
+  }
+  .mm-tip.show { opacity: 1; }
+
+  /* ---------- 钟楼挂钟 ---------- */
+  #clock {
+    position: fixed;
+    left: 34px;
+    bottom: 96px;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    pointer-events: none;
+    opacity: 0.72;
+    animation: fadeUp 1.4s 1s both;
+    transition: opacity 0.4s ease;
+  }
+  #clock.ringing { opacity: 1; }
+  .clock-face {
+    position: relative;
+    width: 42px; height: 42px;
+    flex: none;
+    border: 1px solid rgba(216, 178, 94, 0.55);
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 40%, rgba(28, 24, 17, 0.9), rgba(10, 9, 7, 0.9));
+    box-shadow: 0 0 0 3px rgba(10, 9, 7, 0.5), 0 4px 18px rgba(0, 0, 0, 0.5);
+    transition: box-shadow 0.4s ease, border-color 0.4s ease;
+  }
+  #clock.ringing .clock-face {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 3px rgba(10, 9, 7, 0.5), 0 0 22px rgba(216, 178, 94, 0.55);
+  }
+  .clock-face::before,
+  .clock-face::after {
+    content: "";
+    position: absolute;
+    background: rgba(216, 178, 94, 0.5);
+  }
+  /* 12 点与 6 点刻度 */
+  .clock-face::before {
+    left: 50%; top: 4px;
+    width: 1px; height: 5px;
+    margin-left: -0.5px;
+  }
+  .clock-face::after {
+    left: 50%; bottom: 4px;
+    width: 1px; height: 5px;
+    margin-left: -0.5px;
+  }
+  .hand-hour, .hand-min {
+    position: absolute;
+    left: 50%; bottom: 50%;
+    transform-origin: 50% 100%;
+    background: var(--gold);
+    border-radius: 1px;
+  }
+  .hand-hour { width: 2px; height: 11px; margin-left: -1px; }
+  .hand-min  { width: 1px; height: 15px; margin-left: -0.5px; background: rgba(239, 228, 204, 0.85); }
+  .pin {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 4px; height: 4px;
+    margin: -2px 0 0 -2px;
+    border-radius: 50%;
+    background: var(--gold);
+  }
+  .clock-label {
+    font-size: 10px;
+    letter-spacing: 0.34em;
+    color: rgba(216, 178, 94, 0.72);
+  }
+
+  /* ---------- 悬停提示 ---------- */
+  #tooltip {
+    position: fixed;
+    left: 0; top: 0;
+    z-index: 30;
+    padding: 7px 13px;
+    background: rgba(14, 12, 9, 0.88);
+    border: 1px solid rgba(216, 178, 94, 0.45);
+    border-radius: 2px;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    color: var(--gold);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+    white-space: nowrap;
+    backdrop-filter: blur(6px);
+  }
+  #tooltip.show { opacity: 1; }
+
+  /* ---------- 详情面板 ---------- */
+  #panel {
+    position: fixed;
+    right: 28px; top: 50%;
+    width: 336px;
+    max-width: calc(100vw - 56px);
+    z-index: 20;
+    padding: 26px 26px 24px;
+    background:
+      linear-gradient(160deg, rgba(30, 25, 18, 0.94), rgba(12, 11, 9, 0.94));
+    border: 1px solid rgba(216, 178, 94, 0.3);
+    border-radius: 3px;
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.66);
+    opacity: 0;
+    transform: translate(30px, -50%) scale(0.97);
+    pointer-events: none;
+    transition: opacity 0.4s ease, transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  #panel.show {
+    opacity: 1;
+    transform: translate(0, -50%) scale(1);
+    pointer-events: auto;
+  }
+  #panel::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 22px; bottom: 22px;
+    width: 2px;
+    background: linear-gradient(180deg, transparent, var(--gold), transparent);
+  }
+  #panel-tag {
+    display: inline-block;
+    font-size: 10px;
+    letter-spacing: 0.26em;
+    color: var(--gold);
+    border: 1px solid rgba(216, 178, 94, 0.4);
+    padding: 4px 9px;
+    margin-bottom: 16px;
+    border-radius: 1px;
+  }
+  #panel-title {
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    margin-bottom: 16px;
+    color: #fdf6e6;
+  }
+  #panel-desc {
+    font-size: 13.5px;
+    line-height: 2;
+    color: rgba(239, 228, 204, 0.78);
+    letter-spacing: 0.04em;
+    text-align: justify;
+  }
+  #panel-detail {
+    margin-top: 16px;
+    padding-top: 15px;
+    border-top: 1px dashed rgba(216, 178, 94, 0.24);
+    font-size: 12px;
+    line-height: 1.95;
+    color: rgba(216, 178, 94, 0.72);
+    letter-spacing: 0.04em;
+  }
+  #panel-detail:empty { display: none; }
+  #panel-actions {
+    display: flex;
+    gap: 9px;
+    margin-top: 22px;
+  }
+  #go-there {
+    flex: 1;
+    padding: 10px;
+    background: rgba(216, 178, 94, 0.12);
+    border: 1px solid rgba(216, 178, 94, 0.45);
+    color: var(--gold);
+    font-family: inherit;
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: all 0.25s ease;
+  }
+  #go-there:hover { background: rgba(216, 178, 94, 0.24); color: #fff6df; }
+  #panel-close {
+    width: 42px;
+    background: none;
+    border: 1px solid rgba(239, 228, 204, 0.16);
+    color: rgba(239, 228, 204, 0.55);
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: all 0.25s ease;
+  }
+  #panel-close:hover { color: #fff; border-color: rgba(239, 228, 204, 0.5); }
+
+  /* 暗角 */
+  .vignette {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 50% 45%, transparent 42%, rgba(3, 4, 7, 0.55) 100%);
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .spots-bar { animation-name: fadeUpSpots; }
+  @keyframes fadeUpSpots {
+    from { opacity: 0; transform: translateX(-50%) translateY(14px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
+  @media (max-width: 780px) {
+    .title { left: 18px; top: 20px; }
+    .title h1 { font-size: 24px; }
+    #panel { max-height: 56vh; overflow-y: auto; }
+    .btn { min-width: 0; padding: 9px 11px; font-size: 11px; }
+    .btn span { display: none; }
+    .hint { display: none; }
+    .minimap { width: 128px; height: 128px; left: 14px; bottom: 140px; }
+    #clock { left: 18px; bottom: 74px; }
+    #panel { right: 14px; left: 14px; width: auto; top: auto; bottom: 84px; transform: translate(0, 20px) scale(0.97); }
+    #panel.show { transform: translate(0, 0) scale(1); }
+    .spots-bar { bottom: 14px; }
+  }
+</style>
+<link rel="icon" type="image/svg+xml" href="./favicon.svg">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three/three.module.min.js",
+    "three/addons/": "./vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+<div class="vignette"></div>
+
+<div id="loader">
+  <div class="sigil"></div>
+  <p>筑 城</p>
+</div>
+
+<header class="title">
+  <div class="kicker">Medieval Castle</div>
+  <h1>中世纪城堡</h1>
+  <div class="rule"></div>
+  <p>拖拽旋转 · 滚轮缩放 · 点击建筑</p>
+</header>
+
+<div class="controls">
+  <button class="btn" id="btn-night">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span>夜晚</span>
+  </button>
+  <button class="btn" id="btn-gate">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+      <path d="M5 3v18M12 3v18M19 3v18M3 8h18M3 16h18" stroke-linecap="round"/>
+    </svg>
+    <span>升起闸门</span>
+  </button>
+  <button class="btn" id="btn-festival">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+      <path d="M4 5v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V5" stroke-linecap="round"/>
+      <path d="M4 5l8 8 8-8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M12 13v6M8.5 21h7" stroke-linecap="round"/>
+    </svg>
+    <span>收起集市</span>
+  </button>
+  <button class="btn" id="btn-rotate">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+      <path d="M21 12a9 9 0 1 1-3.2-6.9" stroke-linecap="round"/>
+      <path d="M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span>自动环绕</span>
+  </button>
+  <button class="btn active" id="btn-map">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M12 3v18M3 12h18" stroke-linecap="round" opacity="0.5"/>
+      <circle cx="12" cy="12" r="2.4" fill="currentColor"/>
+    </svg>
+    <span>小地图</span>
+  </button>
+  <button class="btn" id="btn-reset">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+      <path d="M3 11l9-8 9 8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M5 10v10h14V10" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <span>重置视角</span>
+  </button>
+</div>
+
+<div class="spots-bar">
+<nav class="spots">
+  <button class="spot" data-spot="keep">主楼</button>
+  <button class="spot" data-spot="gate">城门楼</button>
+  <button class="spot" data-spot="tower">角塔</button>
+  <button class="spot" data-spot="well">水井</button>
+  <button class="spot" data-spot="hut">庭院</button>
+  <button class="spot" data-spot="village">村落</button>
+  <button class="spot" data-spot="town">镇中心</button>
+  <button class="spot" data-spot="festival">集日</button>
+  <button class="spot" data-spot="craft">工匠区</button>
+  <button class="spot" data-spot="tourney">比武场</button>
+  <button class="spot" data-spot="priory">修道院</button>
+  <button class="spot" data-spot="inn">客栈</button>
+  <button class="spot" data-spot="fort">前哨</button>
+  <button class="spot" data-spot="town2">渡口镇</button>
+  <button class="spot" data-spot="bridgeW">西桥</button>
+  <button class="spot" data-spot="bridgeE">东桥</button>
+  <span class="spot-sep"></span>
+  <button class="spot spot-group" data-group="towns">远方十镇 ▾</button>
+  <button class="spot spot-group" data-group="priory">修道院周边 ▾</button>
+  <button class="spot spot-group" data-group="tourney">比武场周边 ▾</button>
+  <button class="spot spot-group" data-group="inn">客栈周边 ▾</button>
+</nav>
+
+<nav class="spots spots-sub" id="spots-sub" hidden></nav>
+</div>
+
+<div class="minimap" id="minimap">
+  <canvas id="minimap-canvas" width="400" height="400"></canvas>
+</div>
+<div class="mm-tip" id="mm-tip"></div>
+
+<div class="hint">
+  <div><b>拖拽</b> 旋转视角</div>
+  <div><b>滚轮</b> 拉近推远</div>
+  <div><b>点击</b> 建筑查看详情</div>
+</div>
+
+<!-- 钟楼上的镇钟：整点会响 -->
+<div id="clock" title="镇钟">
+  <div class="clock-face">
+    <span class="hand-hour"></span>
+    <span class="hand-min"></span>
+    <span class="pin"></span>
+  </div>
+  <div class="clock-label">钟 楼</div>
+</div>
+
+<div id="tooltip"></div>
+
+<aside id="panel">
+  <div id="panel-tag">城堡核心</div>
+  <h2 id="panel-title">主楼 · Keep</h2>
+  <p id="panel-desc"></p>
+  <p id="panel-detail"></p>
+  <div id="panel-actions">
+    <button id="go-there">飞 过 去</button>
+    <button id="panel-close">×</button>
+  </div>
+</aside>
+
+<script type="module" src="./main.js"></script>
+</body>
+</html>

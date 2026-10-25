@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "castle",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-u", "scripts/serve-nocache.py", "8765", "."],
+      "port": 8765
+    }
+  ]
+}
