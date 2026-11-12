@@ -80,7 +80,7 @@ export function createMinimap(opt) {
   /* ---------- 标记表 ---------- */
   const markers = [
     ...places.map((p) => ({ kind: 'place', key: p.key, name: p.name, x: p.x, z: p.z, color: '#e8d8a8', r: 4 })),
-    ...towns.map((t) => ({ kind: 'town', key: t.key, name: t.name, x: t.x, z: t.z, color: t.color, r: 8 })),
+    ...towns.map((t) => ({ kind: 'town', key: t.key, name: t.name, x: t.x, z: t.z, color: t.color, r: t.village ? 4.5 : 8, small: !!t.village })),
   ];
 
   function draw() {
@@ -97,7 +97,7 @@ export function createMinimap(opt) {
       ctx.lineWidth = 2;
       ctx.strokeStyle = 'rgba(20,16,10,0.9)';
       ctx.stroke();
-      if (m.kind === 'town') {
+      if (m.kind === 'town' && !m.small) {
         ctx.font = `bold ${Math.round(S * 0.042)}px sans-serif`;
         ctx.lineWidth = 4;
         ctx.strokeStyle = 'rgba(20,16,10,0.85)';

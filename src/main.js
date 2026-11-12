@@ -4,6 +4,7 @@ import * as TEX from './textures.js';
 import * as POP from './population.js';
 import * as VIL from './village.js';
 import * as NATURE from './nature.js';
+import { REALM_NAMES } from './realms_data.js';
 import { WORLD_R, SEA, ROADS, smoothPath, seaDepth } from './world.js';
 import { createMinimap } from './minimap.js';
 import * as EXP from './expansion.js';
@@ -17,10 +18,15 @@ import { buildSettlements } from './settlements.js';
 import { buildEastbank } from './eastbank.js';
 import { buildDressing } from './dressing.js';
 import { createPicking } from './picking.js';
+import { batchStatic } from './batching.js';
+import { buildEnrichment } from './enrich.js';
 
 /* ============================================================
  *  基础环境
  * ========================================================== */
+const __marks = [];
+const mark = (n) => __marks.push([n, Math.round(performance.now())]);
+mark('main开始(模块已加载)');
 const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 const IS_SMALL = window.innerWidth < 780;
@@ -40,7 +46,7 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xc4d6e6, 560, 2800);
 
 // 世界扩到 r≈2500 以后，远平面要跟着推；近平面抬到 1.0，免得 24 位深度在千米外把贴地的路面和草地打架
-const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 1.0, 6200);
+const camera = new THREE.PerspectiveCamera(48, window.innerWidth / window.innerHeight, 1.0, 7600);
 
 /* 竖屏 / 窄屏时按宽高比把相机整体推远，保证城堡完整入画
  * 注意：面板折叠 / 标签页隐藏时 innerHeight 可能是 0，直接除会得到 NaN，
@@ -65,7 +71,7 @@ controls.target.set(...HOME.target);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.minDistance = 18;
-controls.maxDistance = 2200;
+controls.maxDistance = 3600;
 controls.maxPolarAngle = Math.PI * 0.495;
 controls.autoRotateSpeed = 0.45;
 controls.update();
@@ -75,13 +81,21 @@ const keepWindows = [];
 const { pickables, interactiveRoots, registerInteractive, setHighlight } = createPicking({ keepWindows });
 
 const mats = buildMaterials({ renderer, scene });
+mark('材质');
 const geom = buildGeom({ scene });
+mark('几何');
 const lighting = buildLighting({ renderer, IS_SMALL, scene, camera, controls, ...mats });
+mark('光照');
 const ground = buildGround({ scene, ...mats });
+mark('地面');
 const castle = buildCastle({ scene, registerInteractive, keepWindows, ...mats, ...geom });
+mark('城堡');
 const settled = buildSettlements({ scene, registerInteractive, keepWindows, ...mats, ...geom, ...castle });
+mark('聚落');
 const east = buildEastbank({ scene, registerInteractive, ...mats, ...geom, ...ground, ...castle, ...settled });
+mark('东岸');
 const dressing = buildDressing({ scene, registerInteractive, ...mats, ...geom, ...castle, ...settled });
+mark('装饰');
 
 const {
   waterTx,
@@ -167,7 +181,15 @@ const EXPANSION = EXP.buildExpansion({
   tex: { waterTx, cloudTx },
 });
 
+mark('外环十镇');
 console.info(`[boot] 外环十镇装配耗时 ${(performance.now() - _bootT0).toFixed(0)} ms`);
+
+/* ---- 老王国的热闹化：更多民居、小物件、树木、牲畜与行人（见 enrich.js） ---- */
+buildEnrichment({
+  scene, TM, GRASS_Y, addPerson, sheep, chickens, chimneys,
+  exclude: [EXPANSION.world, sky, stars, moon, moonDisc, ...clouds, ...people.map((p) => p.root)],
+});
+mark('热闹化');
 
 /* ---- 屋顶炊烟 ---- */
 const smokePuffs = [];
@@ -486,7 +508,12 @@ const SUB_GROUPS = {
   ],
 };
 // 外环十镇：第一层是十个镇，点进某个镇之后第二层换成它的地标（见 showTown）
-SUB_GROUPS.towns = EXPANSION.towns.map((t) => [`town:${t.key}`, t.name]);
+SUB_GROUPS.towns = EXPANSION.towns.filter((t) => !t.kingdom).map((t) => [`town:${t.key}`, t.name]);
+// 琥珀王国：东邻的另一个国家，同样两层导航
+SUB_GROUPS.sol = EXPANSION.towns.filter((t) => t.kingdom === 'sol').map((t) => [`town:${t.key}`, t.name]);
+// 六个远方王国：一个分组，十二个入口（王城 + 王镇）
+
+SUB_GROUPS.realms = Object.keys(REALM_NAMES).filter((k) => k !== 'sol').map((k) => [`realm:${k}`, `${REALM_NAMES[k]}国`]);
 const spotsSub = document.getElementById('spots-sub');
 let openGroup = null;
 
@@ -504,9 +531,20 @@ function showTown(townKey) {
   const t = EXPANSION.towns.find((x) => x.key === townKey);
   if (!t) return;
   spotsSub.innerHTML = '';
-  makeChip('‹ 十镇', () => showGroup('towns'));
+  if (t.kingdom && t.kingdom !== 'sol') makeChip(`‹ ${REALM_NAMES[t.kingdom]}国`, () => showKingdom(t.kingdom));
+  else makeChip(t.kingdom === 'sol' ? '‹ 琥珀王国' : '‹ 十镇', () => showGroup(t.kingdom === 'sol' ? 'sol' : 'towns'));
   makeChip(t.name, () => gotoSpot(SPOTS[`town:${t.key}`]), true);
   for (const lm of t.landmarks) makeChip(lm.name, () => gotoSpot(SPOTS[lm.key]));
+  spotsSub.hidden = false;
+}
+
+/** 六国之一：十处村镇，点进去再换成该镇的地标 */
+function showKingdom(k) {
+  spotsSub.innerHTML = '';
+  makeChip('‹ 六国', () => showGroup('realms'));
+  for (const t of EXPANSION.towns.filter((x) => x.kingdom === k)) {
+    makeChip(t.name, () => { gotoSpot(SPOTS[`town:${t.key}`]); showTown(t.key); });
+  }
   spotsSub.hidden = false;
 }
 
@@ -528,8 +566,9 @@ function showGroup(key) {
     b.textContent = label;
     b.dataset.spot = id;
     b.addEventListener('click', () => {
+      if (id.startsWith('realm:')) { showKingdom(id.slice(6)); return; }
       gotoSpot(SPOTS[id]);
-      if (key === 'towns') showTown(id.slice(5));
+      if (key === 'towns' || key === 'sol') showTown(id.slice(5));
     });
     spotsSub.appendChild(b);
   }
@@ -1048,7 +1087,13 @@ function animate() {
   adaptResolution(performance.now());
   const dt = Math.min(clock.getDelta(), 0.05);
   elapsed += dt;
+  step(dt);
+  if (++shadowFrame % 6 === 0) renderer.shadowMap.needsUpdate = true;
+  renderer.render(scene, camera);
+}
 
+/** 一帧里所有"推进世界"的逻辑（不含渲染），静态批处理的探测也靠它把世界推到不同状态 */
+function step(dt) {
   // 昼夜过渡
   if (Math.abs(state.dayFactor - state.targetNight) > 0.001) {
     state.dayFactor += Math.sign(state.targetNight - state.dayFactor) * dt * 0.8;
@@ -1172,12 +1217,25 @@ function animate() {
   for (const c of clouds) {
     c.position.x += dt * 0.7;
     // 场地半径翻倍后，云的回绕边界也要跟着推到草地外面
-    if (c.position.x > 1900) c.position.x = -1900;
+    if (c.position.x > 3400) c.position.x = -3400;
   }
 
   // 人物：站立呼吸 / 巡逻行走（远方村镇被剔除时 p.skip=true，不必更新）
   for (const p of people) {
     if (p.skip) continue;
+    if (p.lod) {
+      // 只让走动的人沿路径移动，肢体保持原姿势
+      if (p.activity && p.activity.walk && !(p.pause > 0)) {
+        const w = p.activity.walk;
+        const dist = Math.max(0.001, Math.hypot(w.to[0] - w.from[0], w.to[1] - w.from[1]));
+        p.walkT = THREE.MathUtils.clamp(p.walkT + (dt * w.speed * p.dir) / dist, 0, 1);
+        if (p.walkT >= 1) { p.dir = -1; p.pause = 1.8; } else if (p.walkT <= 0) { p.dir = 1; p.pause = 1.8; }
+        p.root.position.x = THREE.MathUtils.lerp(w.from[0], w.to[0], p.walkT);
+        p.root.position.z = THREE.MathUtils.lerp(w.from[1], w.to[1], p.walkT);
+        p.root.rotation.y = Math.atan2(w.to[0] - w.from[0], w.to[1] - w.from[1]) + (p.dir < 0 ? Math.PI : 0);
+      } else if (p.pause > 0) p.pause -= dt;
+      continue;
+    }
     if (p.activity && p.activity.walk) {
       const w = p.activity.walk;
       const dist = Math.max(0.001, Math.hypot(w.to[0] - w.from[0], w.to[1] - w.from[1]));
@@ -1332,8 +1390,6 @@ function animate() {
     });
   }
 
-  if (++shadowFrame % 4 === 0) renderer.shadowMap.needsUpdate = true;
-  renderer.render(scene, camera);
 }
 
 /* ============================================================
@@ -1422,9 +1478,45 @@ function buildCullList() {
   for (const o of scene.children) add(o);
 }
 festival.userData.noCull = true;   // 集日的整组开关由 updateFestival 管
-buildCullList();
 
 const _cullV = new THREE.Vector3();
+
+/* ---- 静态批处理：把确认不会动的碎网格按材质 + 空间格子烘合（见 batching.js） ---- */
+function probeWorld(i) {
+  if (i < 0) {
+    // 复位：回到白天、集日开、闸门落下
+    state.targetNight = 0; state.dayFactor = 0; state.night = false;
+    state.festival = true; state.gatesOpen = false; state.gateAmount = 0;
+    elapsed = 0;
+    for (let k = 0; k < 40; k++) step(0.1);
+    applyTimeOfDay(0);
+    return;
+  }
+  const P = [
+    { t: 37.3, night: 1, fest: false, gate: 1 },
+    { t: 91.7, night: 0, fest: true, gate: 0 },
+    { t: 163.1, night: 1, fest: true, gate: 1 },
+  ][i];
+  state.targetNight = P.night; state.dayFactor = P.night; state.night = !!P.night;
+  state.festival = P.fest; state.gatesOpen = !!P.gate; state.gateAmount = P.gate;
+  applyTimeOfDay(P.night);
+  ringBell(2);
+  for (let k = 0; k < 40; k++) { elapsed = P.t + k * 0.1; step(0.1); }
+}
+mark('探测准备');
+dedupMaterials();   // 先并材质，批处理才能按材质成桶
+mark('材质去重');
+batchStatic(scene, {
+  skip: new Set([sky, stars, moon, moonDisc, sun, sun.target, hemi, fill, nightAmbient, EXPANSION.world, festival, ...clouds, ...people.map((p) => p.root)]),
+  pickSet: new Set(pickables),
+  pickables,
+  skipMats: new Set([...FEST.fadeMats, ...FEST.glowMats]),
+  probes: 3,
+  probe: probeWorld,
+});
+mark('静态批处理');
+buildCullList();
+
 function updateDistanceCull() {
   const cx = camera.position.x;
   const cz = camera.position.z;
@@ -1441,16 +1533,24 @@ function updateDistanceCull() {
     const far = Math.hypot(cx - _cullV.x, cz - _cullV.z) > 380 + allow;
     p.far = far;
     if (!p.home && !p.skip) p.root.visible = !far;
+    // 远处的人（>130 米，屏幕上不过十来个像素）：四肢节点冻结、不再摆动，省下骨架的矩阵更新
+    const lod = Math.hypot(cx - _cullV.x, cz - _cullV.z) > (p.lod ? 110 : 130) + allow * 0.5;
+    if (lod !== !!p.lod) {
+      p.lod = lod;
+      p.root.traverse((o) => { if (o !== p.root) { o.matrixAutoUpdate = !lod; if (!lod) o.matrixWorldNeedsUpdate = true; } });
+    }
   }
 }
 updateDistanceCull();
 
-dedupMaterials();
+mark('剔除表');
 applyTimeOfDay(0);
 animate();
+mark('首帧');
 
 // 方便调试 / 外部驱动相机
 console.info(`[boot] 首帧前总耗时 ${performance.now().toFixed(0)} ms（自页面导航起）`);
+console.info('[marks] ' + __marks.map(([n, t], i) => `${n}:${t - (i ? __marks[i - 1][1] : 0)}`).join(' | '));
 window.__castle = { ADAPT, scene, camera, controls, state, flyTo, applyTimeOfDay, boats, people, THREE, renderer, EXPANSION, SPOTS, gotoSpot };
 
 // 隐藏加载层（不依赖 rAF，后台标签页也能正常收起）

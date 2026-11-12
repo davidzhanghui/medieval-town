@@ -89,9 +89,11 @@ const RIVER_PTS = [
   [-470, 488], [-580, 512], [-660, 528],
   // 世界扩到 r=2000 之后，河不能在旧地图边缘戛然而止：继续向西，一直流出草地
   [-780, 548], [-940, 566], [-1140, 596], [-1380, 640], [-1650, 704], [-1960, 786],
+  // 世界再扩到 r=3300：河继续向西流出草地
+  [-2300, 880], [-2700, 980], [-3100, 1080], [-3380, 1160],
 ];
 // 越往下游越宽：上游 22 米，到镇前 30 米，出图处 38 米，西去更宽
-const RIVER_W = [22, 24, 26, 28, 29, 30, 30, 31, 32, 33, 34, 35, 36, 37, 38, 40, 42, 44, 46, 48, 50];
+const RIVER_W = [22, 24, 26, 28, 29, 30, 30, 31, 32, 33, 34, 35, 36, 37, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58];
 
 /** 到河心的最近距离；用来把树、石头挡在岸上 */
 function riverDist(x, z) {
@@ -186,7 +188,8 @@ const moatWater = buildTerrain();
 function buildSurroundings() {
   // 树林：近处 1100 棵老林子 + 外环 4400 棵（r 760~1900，疏密与近处相当）
   const N_INNER = 1100;
-  const n = N_INNER + 4400;
+  const N_MID = 4400, N_FAR = 5200;
+  const n = N_INNER + N_MID + N_FAR;
   const trunkGeo = new THREE.CylinderGeometry(0.35, 0.55, 3.2, 6);
   const leafGeo = new THREE.ConeGeometry(2.4, 7.5, 7);
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3423, roughness: 1 });
@@ -212,7 +215,9 @@ function buildSurroundings() {
       // 前密后疏：近处仍是老林子，外环按面积均匀撒开
       r = i < N_INNER
         ? 66 + Math.pow(Math.random(), 0.72) * 694
-        : Math.sqrt(760 * 760 + Math.random() * (1900 * 1900 - 760 * 760));
+        : i < N_INNER + N_MID
+          ? Math.sqrt(760 * 760 + Math.random() * (1900 * 1900 - 760 * 760))
+          : Math.sqrt(1900 * 1900 + Math.random() * ((WORLD_R - 80) ** 2 - 1900 * 1900));
       guard++;
     } while (inClearZone(Math.cos(a) * r, Math.sin(a) * r, 4) && guard < 24);
     // 试了 24 次还落在禁种区里的，干脆不长（以前是硬种下去，会插进房子里）
@@ -237,7 +242,7 @@ function buildSurroundings() {
 
   // 散落岩石（同样避开村镇占用的地块，别落到屋顶上）。
   // 600 块合成一个 InstancedMesh：以前是 150 个独立网格，外环扩出来之后会变成 600 次绘制
-  const N_ROCKS = 600;
+  const N_ROCKS = 900;
   const rockGeo = new THREE.DodecahedronGeometry(1, 0);
   const rockMat = new THREE.MeshStandardMaterial({ color: 0x77705f, roughness: 0.95, flatShading: true });
   const rocks = new THREE.InstancedMesh(rockGeo, rockMat, N_ROCKS);
@@ -249,7 +254,7 @@ function buildSurroundings() {
     let a, r, rx, rz, guard = 0;
     do {
       a = Math.random() * Math.PI * 2;
-      r = i < 150 ? 62 + Math.random() * 660 : Math.sqrt(760 * 760 + Math.random() * (1900 * 1900 - 760 * 760));
+      r = i < 150 ? 62 + Math.random() * 660 : i < 600 ? Math.sqrt(760 * 760 + Math.random() * (1900 * 1900 - 760 * 760)) : Math.sqrt(1900 * 1900 + Math.random() * ((WORLD_R - 80) ** 2 - 1900 * 1900));
       rx = Math.cos(a) * r;
       rz = Math.sin(a) * r;
       guard++;
@@ -267,8 +272,8 @@ function buildSurroundings() {
 
   // 远山：地平线上的那一圈剪影。近处的几座真山由 NATURE 生成，这里只负责远景
   const mtnMat = new THREE.MeshStandardMaterial({ color: 0x6b8199, roughness: 1, flatShading: true });
-  for (let i = 0; i < 46; i++) {
-    const a = (i / 46) * Math.PI * 2 + Math.random() * 0.25;
+  for (let i = 0; i < 80; i++) {
+    const a = (i / 80) * Math.PI * 2 + Math.random() * 0.25;
     // 草地铺到 WORLD_R（2000），山脚要站到草地外面
     const r = WORLD_R + 150 + Math.random() * 420;
     const h = 130 + Math.random() * 210;
@@ -284,10 +289,10 @@ function buildSurroundings() {
     color: 0xffffff, toneMapped: false,
   });
   const clouds = [];
-  for (let i = 0; i < 34; i++) {
+  for (let i = 0; i < 60; i++) {
     const sp = new THREE.Sprite(cloudMat.clone());
     const a = Math.random() * Math.PI * 2;
-    const r = 150 + Math.random() * 1600;
+    const r = 150 + Math.random() * 3000;
     sp.position.set(Math.cos(a) * r, 80 + Math.random() * 90, Math.sin(a) * r);
     const sc = 90 + Math.random() * 130;
     sp.scale.set(sc, sc * 0.5, 1);

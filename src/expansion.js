@@ -75,7 +75,9 @@ export function buildExpansion(ctx) {
   roadMat.polygonOffsetUnits = -3;
   for (const road of ROADS) {
     const pts = smoothPath(road.pts, 20);
-    const mesh = VIL.makeRoad({ road: roadMat }, pts, road.w);
+    let rm = roadMat;
+    if (road.tint != null) { rm = roadMat.clone(); rm.color.setHex(road.tint); }
+    const mesh = VIL.makeRoad({ road: rm }, pts, road.w);
     mesh.position.y = GRASS_Y + 0.08;
     mesh.userData.road = road.name;
     world.add(mesh);
@@ -413,6 +415,9 @@ export function buildExpansion(ctx) {
       if (show !== town.visible) {
         town.visible = show;
         town.root.visible = show;
+        // 被剔除的镇整个摘出场景图：visible=false 的节点每帧仍要递归更新矩阵，十个镇有几千个节点
+        if (show) { if (town.root.parent !== world) { world.add(town.root); town.root.updateMatrixWorld(true); } }
+        else if (town.root.parent === world) world.remove(town.root);
         if (town.beacon) town.beacon.visible = !show;
         for (const p of town.people) p.skip = !show;
       }
@@ -442,6 +447,8 @@ export function buildExpansion(ctx) {
     for (const lm of t.landmarks) spots[lm.key] = lm.root;
     return {
       key: t.site.key,
+      kingdom: t.site.kingdom || null,
+      village: !!t.site.village,
       name: t.site.name,
       en: t.site.en,
       x: t.site.x,
