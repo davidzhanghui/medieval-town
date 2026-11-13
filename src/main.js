@@ -485,7 +485,24 @@ function gotoSpot(root) {
   if (v) flyTo(v.pos, v.target);
 }
 
-/* ---- 外围场景的分组条：点母场景按钮展开它的五个邻居 ---- */
+/* ---- 底部导航按王国组织 ----
+ * 第一行是王国。老王国展开后是城堡一带的地标，外围与远方十镇再套一层。
+ * 其余王国展开后是十处村镇，点进某一处再换成它的地标。
+ */
+const REALM_KEYS = new Set(Object.keys(REALM_NAMES));
+const NESTED_UNDER_HOME = new Set(['towns', 'priory', 'tourney', 'inn']);
+const HOME_SPOTS = [
+  ['keep', '主楼'], ['gate', '城门楼'], ['tower', '角塔'], ['well', '水井'], ['hut', '庭院'],
+  ['village', '村落'], ['town', '镇中心'], ['festival', '集日'], ['craft', '工匠区'],
+  ['tourney', '比武场'], ['priory', '修道院'], ['inn', '客栈'], ['fort', '前哨'],
+  ['town2', '渡口镇'], ['bridgeW', '西桥'], ['bridgeE', '东桥'],
+];
+const HOME_GROUPS = [
+  ['towns', '远方十镇'],
+  ['priory', '修道院周边'],
+  ['tourney', '比武场周边'],
+  ['inn', '客栈周边'],
+];
 // 每组十项：前五项是第一圈，后五项是第二圈
 const SUB_GROUPS = {
   priory: [
@@ -507,87 +524,96 @@ const SUB_GROUPS = {
     ['millercottage', '水磨人家'], ['gallow', '绞架'],
   ],
 };
-// 外环十镇：第一层是十个镇，点进某个镇之后第二层换成它的地标（见 showTown）
 SUB_GROUPS.towns = EXPANSION.towns.filter((t) => !t.kingdom).map((t) => [`town:${t.key}`, t.name]);
-// 琥珀王国：东邻的另一个国家，同样两层导航
-SUB_GROUPS.sol = EXPANSION.towns.filter((t) => t.kingdom === 'sol').map((t) => [`town:${t.key}`, t.name]);
-// 六个远方王国：一个分组，十二个入口（王城 + 王镇）
 
-SUB_GROUPS.realms = Object.keys(REALM_NAMES).filter((k) => k !== 'sol').map((k) => [`realm:${k}`, `${REALM_NAMES[k]}国`]);
+function kingdomLabel(k) {
+  if (k === 'home') return '老王国';
+  if (k === 'sol') return '琥珀王国';
+  return `${REALM_NAMES[k]}国`;
+}
+
+const spotsMain = document.getElementById('spots-main');
 const spotsSub = document.getElementById('spots-sub');
 let openGroup = null;
 
-function makeChip(label, handler, on = false) {
+const KINGDOM_BUTTONS = [
+  ['home', '老王国'],
+  ...Object.keys(REALM_NAMES).map((k) => [k, kingdomLabel(k)]),
+];
+for (const [key, label] of KINGDOM_BUTTONS) {
   const b = document.createElement('button');
-  b.className = 'spot' + (on ? ' on' : '');
+  b.className = 'spot spot-group';
+  b.dataset.group = key;
+  b.textContent = `${label} ▾`;
+  b.addEventListener('click', () => showGroup(openGroup === key ? null : key));
+  spotsMain.appendChild(b);
+}
+
+function makeChip(label, handler, className = 'spot') {
+  const b = document.createElement('button');
+  b.className = className;
   b.textContent = label;
   b.addEventListener('click', handler);
   spotsSub.appendChild(b);
   return b;
 }
 
-/** 点进某个镇之后：左边一个"‹ 十镇"返回，接着是镇名与它的地标 */
+function paintKingdom() {
+  const active = openGroup === 'home' || NESTED_UNDER_HOME.has(openGroup) ? 'home'
+    : (REALM_KEYS.has(openGroup) ? openGroup : null);
+  for (const b of spotsMain.querySelectorAll('.spot-group')) {
+    b.classList.toggle('on', b.dataset.group === active);
+  }
+}
+
+/** 点进某个镇之后：左边返回王国（或十镇），接着是镇名与它的地标 */
 function showTown(townKey) {
   const t = EXPANSION.towns.find((x) => x.key === townKey);
   if (!t) return;
+  openGroup = t.kingdom || 'towns';
+  paintKingdom();
   spotsSub.innerHTML = '';
-  if (t.kingdom && t.kingdom !== 'sol') makeChip(`‹ ${REALM_NAMES[t.kingdom]}国`, () => showKingdom(t.kingdom));
-  else makeChip(t.kingdom === 'sol' ? '‹ 琥珀王国' : '‹ 十镇', () => showGroup(t.kingdom === 'sol' ? 'sol' : 'towns'));
-  makeChip(t.name, () => gotoSpot(SPOTS[`town:${t.key}`]), true);
+  if (t.kingdom) makeChip(`‹ ${kingdomLabel(t.kingdom)}`, () => showGroup(t.kingdom));
+  else makeChip('‹ 十镇', () => showGroup('towns'));
+  makeChip(t.name, () => gotoSpot(SPOTS[`town:${t.key}`]), 'spot on');
   for (const lm of t.landmarks) makeChip(lm.name, () => gotoSpot(SPOTS[lm.key]));
   spotsSub.hidden = false;
 }
 
-/** 六国之一：十处村镇，点进去再换成该镇的地标 */
-function showKingdom(k) {
-  spotsSub.innerHTML = '';
-  makeChip('‹ 六国', () => showGroup('realms'));
-  for (const t of EXPANSION.towns.filter((x) => x.kingdom === k)) {
-    makeChip(t.name, () => { gotoSpot(SPOTS[`town:${t.key}`]); showTown(t.key); });
-  }
-  spotsSub.hidden = false;
-}
-
 function showGroup(key) {
-  for (const b of document.querySelectorAll('.spot-group')) {
-    b.classList.toggle('on', b.dataset.group === key);
-  }
   if (!key) {
     spotsSub.hidden = true;
     spotsSub.innerHTML = '';
     openGroup = null;
+    paintKingdom();
     return;
   }
   openGroup = key;
+  paintKingdom();
   spotsSub.innerHTML = '';
-  for (const [id, label] of SUB_GROUPS[key]) {
-    const b = document.createElement('button');
-    b.className = 'spot';
-    b.textContent = label;
-    b.dataset.spot = id;
-    b.addEventListener('click', () => {
-      if (id.startsWith('realm:')) { showKingdom(id.slice(6)); return; }
-      gotoSpot(SPOTS[id]);
-      if (key === 'towns' || key === 'sol') showTown(id.slice(5));
-    });
-    spotsSub.appendChild(b);
+  if (key === 'home') {
+    for (const [id, label] of HOME_SPOTS) makeChip(label, () => gotoSpot(SPOTS[id]));
+    const sep = document.createElement('span');
+    sep.className = 'spot-sep';
+    spotsSub.appendChild(sep);
+    for (const [id, label] of HOME_GROUPS) makeChip(`${label} ▾`, () => showGroup(id), 'spot spot-nest');
+  } else if (REALM_KEYS.has(key)) {
+    for (const t of EXPANSION.towns.filter((x) => x.kingdom === key)) {
+      makeChip(t.name, () => { gotoSpot(SPOTS[`town:${t.key}`]); showTown(t.key); });
+    }
+  } else {
+    makeChip('‹ 老王国', () => showGroup('home'));
+    for (const [id, label] of SUB_GROUPS[key]) {
+      makeChip(label, () => {
+        gotoSpot(SPOTS[id]);
+        if (key === 'towns') showTown(id.slice(5));
+      });
+    }
   }
   spotsSub.hidden = false;
 }
 
-for (const b of document.querySelectorAll('.spot-group')) {
-  b.addEventListener('click', () => {
-    const key = b.dataset.group;
-    showGroup(openGroup === key ? null : key);
-  });
-}
-
-document.querySelectorAll('.spot:not(.spot-group)').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    gotoSpot(SPOTS[btn.dataset.spot]);
-    if (openGroup) showGroup(null);
-  });
-});
+showGroup('home');
 
 /* ============================================================
  *  小地图：点地标飞过去，点空地飞到那一带的高空
@@ -613,10 +639,10 @@ const MINIMAP = createMinimap({
   onPick(pick) {
     if (pick.type === 'town') {
       gotoSpot(SPOTS[`town:${pick.key}`]);
-      showGroup('towns');
       showTown(pick.key);
     } else if (pick.type === 'place') {
       gotoSpot(SPOTS[pick.key]);
+      showGroup('home');
     } else {
       flyTo([pick.x + 120, 170, pick.z + 170], [pick.x, 0, pick.z]);
     }
